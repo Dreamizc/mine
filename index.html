@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ระบบจัดการร้านเดลิเวอรี่</title>
+  <meta name="description" content="ระบบจัดการต้นทุน ราคาเมนู ออเดอร์ และกำไร/ขาดทุน สำหรับร้านอาหารเดลิเวอรี่">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">🍱</div>
+        <div>
+          <div class="brand-name" id="shopName">ร้านของฉัน</div>
+          <div class="brand-sub">ระบบจัดการร้านเดลิเวอรี่</div>
+        </div>
+      </div>
+      <nav class="nav" id="nav">
+        <a href="#dashboard" data-page="dashboard"><span>📊</span>ภาพรวม</a>
+        <a href="#orders" data-page="orders"><span>🧾</span>รับออเดอร์</a>
+        <a href="#menus" data-page="menus"><span>🍛</span>เมนู &amp; ต้นทุน</a>
+        <a href="#ingredients" data-page="ingredients"><span>🥬</span>วัตถุดิบ &amp; สต็อก</a>
+        <a href="#expenses" data-page="expenses"><span>💡</span>ค่าใช้จ่าย</a>
+        <a href="#ads" data-page="ads"><span>📣</span>ค่าโฆษณา</a>
+        <a href="#reports" data-page="reports"><span>📈</span>กำไร/ขาดทุน</a>
+        <a href="#settings" data-page="settings"><span>⚙️</span>ตั้งค่า</a>
+      </nav>
+    </aside>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+
+  <dialog id="modal" class="modal">
+    <form method="dialog" class="modal-box" id="modalForm" novalidate>
+      <header class="modal-head">
+        <h2 id="modalTitle"></h2>
+        <button type="button" class="icon-btn" data-close aria-label="ปิด">✕</button>
+      </header>
+      <div class="modal-body" id="modalBody"></div>
+      <footer class="modal-foot">
+        <button type="button" class="btn" data-close>ยกเลิก</button>
+        <button type="submit" class="btn primary" id="modalSave">บันทึก</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+
+  <script src="js/core.js"></script>
+  <script src="js/demo.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
