@@ -37,6 +37,19 @@ function openModal({ title, body, saveText = 'บันทึก', wide = false,
   const first = $('input:not([type=checkbox]), select', $('#modalBody'));
   if (first) first.focus();
 }
+/** กล่องยืนยันภายในหน้า ใช้แทนกล่องยืนยันของเบราว์เซอร์ */
+function askConfirm(message, yesText = 'ยืนยัน') {
+  return new Promise((resolve) => {
+    let ok = false;
+    openModal({
+      title: 'ยืนยันการทำรายการ',
+      body: `<p style="white-space:pre-line;margin:0">${esc(message)}</p>`,
+      saveText: yesText,
+      onSave: () => { ok = true; },
+    });
+    $('#modal').addEventListener('close', () => resolve(ok), { once: true });
+  });
+}
 function closeModal() { const dlg = $('#modal'); if (dlg.open) dlg.close(); Modal.onSave = null; }
 $('#modalForm').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -527,7 +540,7 @@ function renderHistory() {
     list.forEach((o) => { const c = orderCalc(o); rows.push([o.date, o.time, channelById(o.channelId).name, o.ref, o.items.map((i) => `${i.name} x${i.qty}`).join(' | '), round2(c.subtotal), round2(c.disc), o.discountBy === 'platform' ? 'แอพ' : 'ร้าน', round2(c.gp), round2(c.netRevenue), round2(c.varCost), round2(c.extra), round2(c.profit), o.note]); });
     downloadFile(`orders_${H.from}_${H.to}.csv`, toCSV(rows), 'text/csv;charset=utf-8');
   };
-  $('#ordBody').onclick = (e) => {
+  $('#ordBody').onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.edit) {
@@ -536,7 +549,7 @@ function renderHistory() {
       UI.ordersTab = 'pos';
       renderOrders();
     } else if (b.dataset.delorder) {
-      if (!confirm('ลบออเดอร์นี้? (สต็อกวัตถุดิบจะถูกคืน)')) return;
+      if (!await askConfirm('ลบออเดอร์นี้? (สต็อกวัตถุดิบจะถูกคืน)')) return;
       const o = byId(DB.orders, b.dataset.delorder);
       applyStock(o, -1);
       DB.orders = DB.orders.filter((x) => x !== o);
@@ -606,7 +619,7 @@ function renderMenus() {
   const s = $('#menuSearch');
   s.oninput = () => { F.q = s.value; const p = s.selectionStart; renderMenus(); const n = $('#menuSearch'); n.focus(); n.setSelectionRange(p, p); };
   $$('#menuCats [data-cat]').forEach((b) => b.onclick = () => { F.cat = b.dataset.cat; renderMenus(); });
-  main.onclick = (e) => {
+  main.onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.editmenu) menuModal(byId(DB.menus, b.dataset.editmenu));
@@ -616,7 +629,7 @@ function renderMenus() {
       DB.menus.push(m); commit('คัดลอกเมนูแล้ว');
     } else if (b.dataset.delmenu) {
       const m = byId(DB.menus, b.dataset.delmenu);
-      if (!confirm(`ลบเมนู "${m.name}"? (ออเดอร์เก่ายังคงอยู่)`)) return;
+      if (!await askConfirm(`ลบเมนู "${m.name}"? (ออเดอร์เก่ายังคงอยู่)`)) return;
       DB.menus = DB.menus.filter((x) => x !== m); commit('ลบเมนูแล้ว');
     }
   };
@@ -784,7 +797,7 @@ function renderIngredients() {
   $$('#ingTabs button').forEach((b) => b.onclick = () => { UI.ingTab = b.dataset.tab; renderIngredients(); });
   $('#addIng').onclick = () => ingredientModal();
   $('#buyIng').onclick = () => purchaseModal();
-  main.onclick = (e) => {
+  main.onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.addfirst != null) ingredientModal();
@@ -793,13 +806,13 @@ function renderIngredients() {
     else if (b.dataset.deling) {
       const i = byId(DB.ingredients, b.dataset.deling);
       const n = usedIn(i.id);
-      if (!confirm(`ลบ "${i.name}"?${n ? `\nวัตถุดิบนี้ใช้อยู่ใน ${n} เมนู และจะถูกนำออกจากสูตร` : ''}`)) return;
+      if (!await askConfirm(`ลบ "${i.name}"?${n ? `\nวัตถุดิบนี้ใช้อยู่ใน ${n} เมนู และจะถูกนำออกจากสูตร` : ''}`)) return;
       DB.ingredients = DB.ingredients.filter((x) => x !== i);
       DB.menus.forEach((m) => { m.ingredients = (m.ingredients || []).filter((r) => r.id !== i.id); });
       commit('ลบวัตถุดิบแล้ว');
     } else if (b.dataset.delpur) {
       const p = byId(DB.purchases, b.dataset.delpur);
-      if (!confirm('ลบรายการซื้อนี้? (สต็อกจะถูกหักออกคืน)')) return;
+      if (!await askConfirm('ลบรายการซื้อนี้? (สต็อกจะถูกหักออกคืน)')) return;
       const i = byId(DB.ingredients, p.ingredientId);
       if (i && i.trackStock) i.stock = round2(num(i.stock) - num(p.packs) * num(i.packSize));
       DB.purchases = DB.purchases.filter((x) => x !== p);
@@ -933,7 +946,7 @@ function renderExpenses() {
 
   $('#saveDpm').onclick = () => { DB.settings.dishesPerMonth = Math.max(1, num($('#dpm').value)); commit('บันทึกแล้ว — ต้นทุนเมนูอัปเดต'); };
   const ua = $('#useActual'); if (ua) ua.onclick = () => { DB.settings.dishesPerMonth = Math.round(actualDishes); commit('ใช้จำนวนจานจริงแล้ว'); };
-  main.onclick = (e) => {
+  main.onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.addexp) expenseModal(null, b.dataset.addexp);
@@ -941,7 +954,7 @@ function renderExpenses() {
     else if (b.dataset.delexp) {
       const x = byId(DB.expenses, b.dataset.delexp);
       const n = usedIn(x.id);
-      if (!confirm(`ลบ "${x.name}"?${n ? `\nรายการนี้ใช้อยู่ใน ${n} เมนู และจะถูกนำออก` : ''}`)) return;
+      if (!await askConfirm(`ลบ "${x.name}"?${n ? `\nรายการนี้ใช้อยู่ใน ${n} เมนู และจะถูกนำออก` : ''}`)) return;
       DB.expenses = DB.expenses.filter((y) => y !== x);
       DB.menus.forEach((m) => { m.expenses = (m.expenses || []).filter((r) => r.id !== x.id); });
       commit('ลบแล้ว');
@@ -1022,11 +1035,11 @@ function renderAds() {
   const f = $('#adFilters');
   f.addEventListener('change', () => { Object.assign(A, readForm(f)); if (!A.month) A.month = today().slice(0, 7); renderAds(); });
   $('#addAd').onclick = () => adModal();
-  main.onclick = (e) => {
+  main.onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.editad) adModal(byId(DB.ads, b.dataset.editad));
-    else if (b.dataset.delad) { if (!confirm('ลบรายการนี้?')) return; DB.ads = DB.ads.filter((a) => a.id !== b.dataset.delad); commit('ลบแล้ว'); }
+    else if (b.dataset.delad) { if (!await askConfirm('ลบรายการนี้?')) return; DB.ads = DB.ads.filter((a) => a.id !== b.dataset.delad); commit('ลบแล้ว'); }
   };
 }
 
@@ -1266,10 +1279,10 @@ function renderSettings() {
   });
   $('#saveCh').onclick = () => { readChannels(); commit('บันทึกช่องทางแล้ว'); };
   $('#addCh').onclick = () => { readChannels(); DB.channels.push({ id: uid(), name: 'ช่องทางใหม่', gp: 0, vatOnGp: false, gpBeforeDiscount: true, active: true }); commit(); };
-  $$('[data-delch]').forEach((b) => b.onclick = () => {
+  $$('[data-delch]').forEach((b) => b.onclick = async () => {
     const used = DB.orders.some((o) => o.channelId === b.dataset.delch);
     if (used) return toast('ช่องทางนี้มีออเดอร์อยู่ — ให้ปิดการใช้งานแทนการลบ', 'error');
-    if (!confirm('ลบช่องทางนี้?')) return;
+    if (!await askConfirm('ลบช่องทางนี้?')) return;
     readChannels();
     DB.channels = DB.channels.filter((c) => c.id !== b.dataset.delch);
     commit('ลบแล้ว');
@@ -1278,22 +1291,23 @@ function renderSettings() {
   $('#restore').onchange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    file.text().then((txt) => {
+    e.target.value = '';
+    file.text().then(async (txt) => {
       let data;
       try { data = JSON.parse(txt); } catch (err) { return toast('ไฟล์ไม่ถูกต้อง', 'error'); }
       if (!data || !Array.isArray(data.menus) || !Array.isArray(data.orders)) return toast('ไฟล์ไม่ใช่ไฟล์สำรองของระบบนี้', 'error');
-      if (!confirm('กู้คืนข้อมูลจากไฟล์? ข้อมูลปัจจุบันจะถูกแทนที่ทั้งหมด')) return;
+      if (!await askConfirm('กู้คืนข้อมูลจากไฟล์? ข้อมูลปัจจุบันจะถูกแทนที่ทั้งหมด')) return;
       Store.replace(data);
       toast('กู้คืนข้อมูลแล้ว');
       render();
     });
   };
-  $('#demo').onclick = () => {
-    if ((DB.orders.length || DB.menus.length) && !confirm('โหลดข้อมูลตัวอย่าง? ข้อมูลปัจจุบันจะถูกแทนที่ (แนะนำให้สำรองข้อมูลก่อน)')) return;
+  $('#demo').onclick = async () => {
+    if ((DB.orders.length || DB.menus.length) && !await askConfirm('โหลดข้อมูลตัวอย่าง? ข้อมูลปัจจุบันจะถูกแทนที่ (แนะนำให้สำรองข้อมูลก่อน)')) return;
     Store.replace(buildDemoData()); UI.pos = null; toast('โหลดข้อมูลตัวอย่างแล้ว'); render();
   };
-  $('#wipe').onclick = () => {
-    if (!confirm('ล้างข้อมูลทั้งหมด? ไม่สามารถย้อนกลับได้ (แนะนำให้สำรองข้อมูลก่อน)')) return;
+  $('#wipe').onclick = async () => {
+    if (!await askConfirm('ล้างข้อมูลทั้งหมด? ไม่สามารถย้อนกลับได้ (แนะนำให้สำรองข้อมูลก่อน)')) return;
     Store.reset(); UI.pos = null; toast('ล้างข้อมูลแล้ว'); render();
   };
 }
