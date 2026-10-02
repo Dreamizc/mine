@@ -72,6 +72,8 @@ const Store = {
     return data;
   },
   save() {
+    // โหมดออนไลน์: ส่งเฉพาะส่วนที่เปลี่ยนขึ้น Firebase (Firestore มีแคชออฟไลน์ของตัวเอง)
+    if (typeof Sync !== 'undefined' && Sync.cfg) { if (Sync.active) Sync.push(); return true; }
     try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); return true; }
     catch (e) { if (typeof toast === 'function') toast('บันทึกไม่สำเร็จ: พื้นที่จัดเก็บของเบราว์เซอร์เต็ม', 'error'); return false; }
   },

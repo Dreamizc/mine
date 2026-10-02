@@ -86,6 +86,16 @@ const activeChannels = () => DB.channels.filter((c) => c.active !== false);
 const ingCategories = () => DB.ingredients.map((i) => i.category);
 const menuCategories = () => [...new Set(DB.menus.map((m) => m.category).filter(Boolean))];
 function commit(msg) { if (Store.save() && msg) toast(msg); render(); }
+function copyText(text, okMsg = 'คัดลอกแล้ว') {
+  const fallback = () => {
+    const t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); toast(okMsg); } catch (e) { toast('คัดลอกไม่สำเร็จ กรุณาเลือกข้อความแล้วคัดลอกเอง', 'error'); }
+    t.remove();
+  };
+  try { navigator.clipboard.writeText(text).then(() => toast(okMsg), fallback); } catch (e) { fallback(); }
+}
 
 /* ---------- Tooltip (ใช้ textContent เพื่อความปลอดภัย) ---------- */
 const tip = $('#tooltip');
@@ -476,7 +486,7 @@ function saveOrder() {
     const old = byId(DB.orders, P.editingId);
     if (old) { applyStock(old, -1); Object.assign(old, o, { updatedAt: Date.now() }); applyStock(old, 1); }
   } else {
-    const rec = { id: uid(), ...o, createdAt: Date.now() };
+    const rec = { id: uid(), ...o, by: Sync.email || '', createdAt: Date.now() };
     DB.orders.push(rec);
     applyStock(rec, 1);
   }
@@ -498,7 +508,7 @@ function renderHistory() {
     const c = orderCalc(o);
     for (const k in tot) tot[k] += c[k];
     return `<tr>
-      <td>${esc(thDate(o.date))}<div class="small muted">${esc(o.time || '')}</div></td>
+      <td>${esc(thDate(o.date))}<div class="small muted">${esc(o.time || '')}${o.by ? ` · ${esc(o.by.split('@')[0])}` : ''}</div></td>
       <td>${esc(channelById(o.channelId).name)}${o.ref ? `<div class="small muted">${esc(o.ref)}</div>` : ''}</td>
       <td class="small">${o.items.map((it) => `${esc(it.name)} ×${fmt(it.qty, 0)}`).join('<br>')}${o.note ? `<div class="muted">📝 ${esc(o.note)}</div>` : ''}</td>
       <td class="num">${baht(c.subtotal)}</td>
@@ -742,7 +752,7 @@ function menuModal(m) {
       if (!res.name) { toast('กรุณาใส่ชื่อเมนู', 'error'); return false; }
       if (!(res.price > 0)) { toast('กรุณาใส่ราคาขาย', 'error'); return false; }
       if (isNew) DB.menus.push({ ...res, id: uid() });
-      else Object.assign(byId(DB.menus, m.id), res);
+      else Object.assign(byId(DB.menus, m.id) || {}, res);
       commit(isNew ? 'เพิ่มเมนูแล้ว' : 'บันทึกเมนูแล้ว');
     },
   });
@@ -853,7 +863,7 @@ function ingredientModal(i) {
       if (!f.name.trim() || !f.unit.trim() || !(num(f.packSize) > 0)) { toast('กรุณากรอกชื่อ หน่วย และขนาดให้ครบ', 'error'); return false; }
       const y = num(f.yield);
       const rec = { name: f.name.trim(), category: f.category.trim(), unit: f.unit.trim(), packLabel: f.packLabel.trim(), packSize: num(f.packSize), packPrice: num(f.packPrice), yield: y > 0 && y <= 100 ? y : 100, trackStock: f.trackStock, stock: num(f.stock), minStock: num(f.minStock) };
-      if (isNew) DB.ingredients.push({ id: uid(), ...rec }); else Object.assign(i, rec);
+      if (isNew) DB.ingredients.push({ id: uid(), ...rec }); else Object.assign(byId(DB.ingredients, i.id) || i, rec);
       commit(isNew ? 'เพิ่มวัตถุดิบแล้ว' : 'บันทึกแล้ว — ต้นทุนเมนูที่ใช้วัตถุดิบนี้อัปเดตอัตโนมัติ');
     },
   });
@@ -980,7 +990,7 @@ function expenseModal(x, type) {
       const f = readForm(root);
       if (!f.name.trim()) { toast('กรุณาใส่ชื่อรายการ', 'error'); return false; }
       const rec = { name: f.name.trim(), type: f.type, amount: num(f.amount), unit: f.unit.trim(), category: f.category.trim() };
-      if (isNew) DB.expenses.push({ id: uid(), ...rec }); else Object.assign(x, rec);
+      if (isNew) DB.expenses.push({ id: uid(), ...rec }); else Object.assign(byId(DB.expenses, x.id) || x, rec);
       commit(isNew ? 'เพิ่มค่าใช้จ่ายแล้ว' : 'บันทึกแล้ว');
     },
   });
@@ -1068,7 +1078,7 @@ function adModal(a) {
     onSave: (root) => {
       const f = readForm(root);
       if (!(num(f.amount) > 0) || !f.from) { toast('กรุณาใส่จำนวนเงินและวันที่', 'error'); return false; }
-      if (!isNew) { Object.assign(a, { date: f.from, channelId: f.channelId, amount: num(f.amount), note: f.note.trim() }); return commit('บันทึกแล้ว'); }
+      if (!isNew) { Object.assign(byId(DB.ads, a.id) || a, { date: f.from, channelId: f.channelId, amount: num(f.amount), note: f.note.trim() }); return commit('บันทึกแล้ว'); }
       if (!f.to || f.to < f.from) { toast('ช่วงวันที่ไม่ถูกต้อง', 'error'); return false; }
       const n = daysBetween(f.from, f.to);
       if (n > 366) { toast('บันทึกได้ครั้งละไม่เกิน 366 วัน', 'error'); return false; }
@@ -1120,6 +1130,7 @@ function renderReports() {
     <div style="align-self:flex-end;padding-bottom:8px">${fCheck('includeFixed', 'หักค่าใช้จ่ายคงที่ (ค่าแรง/ค่าเช่า/ค่าไฟ)', R.includeFixed)}</div>
   </div>
 
+  ${Sync.active && R.from < Sync.cutoff() ? `<div class="alert warn" style="margin-bottom:16px">☁️ <div>โหมดออนไลน์โหลดข้อมูลไว้ ${Sync.days()} วันล่าสุด (ตั้งแต่ ${esc(thDate(Sync.cutoff()))}) ข้อมูลก่อนหน้านั้นจะไม่แสดงในรายงานนี้ ปรับจำนวนวันได้ที่ <a href="#settings">ตั้งค่า</a></div></div>` : ''}
   <div class="grid g4">
     <div class="card kpi"><div class="label">ยอดขาย</div><div class="value">${baht0(t.subtotal)}</div><div class="sub">${t.orders} ออเดอร์ · ${fmt(t.qty, 0)} จาน</div></div>
     <div class="card kpi"><div class="label">กำไรขั้นต้น</div><div class="value ${signCls(gross)}">${baht0(gross)}</div><div class="sub">หลัง GP ส่วนลด ต้นทุนวัตถุดิบ</div></div>
@@ -1231,7 +1242,7 @@ function renderSettings() {
 
     <div class="card">
       <h3>สำรอง &amp; กู้คืนข้อมูล</h3>
-      <p class="small muted" style="margin-top:0">ข้อมูลทั้งหมดเก็บไว้ในเบราว์เซอร์เครื่องนี้ ควรสำรองข้อมูลเป็นประจำ (เช่น ทุกสัปดาห์) หรือใช้ไฟล์สำรองเพื่อย้ายไปเครื่องอื่น</p>
+      <p class="small muted" style="margin-top:0">${Sync.active ? `ข้อมูลเก็บบนออนไลน์ (Firebase) แล้ว ไฟล์สำรองจะมีออเดอร์/ค่าโฆษณาย้อนหลัง ${Sync.days()} วันตามที่โหลดไว้` : 'ข้อมูลทั้งหมดเก็บไว้ในเบราว์เซอร์เครื่องนี้ ควรสำรองข้อมูลเป็นประจำ (เช่น ทุกสัปดาห์) หรือใช้ไฟล์สำรองเพื่อย้ายไปเครื่องอื่น'}</p>
       <div class="actions">
         <button class="btn primary" id="backup">⬇️ ดาวน์โหลดไฟล์สำรอง</button>
         <label class="btn">⬆️ กู้คืนจากไฟล์<input type="file" id="restore" accept="application/json,.json" hidden></label>
@@ -1244,6 +1255,8 @@ function renderSettings() {
       <p class="small muted">ข้อมูลปัจจุบัน: เมนู ${DB.menus.length} · วัตถุดิบ ${DB.ingredients.length} · ออเดอร์ ${DB.orders.length} · ค่าโฆษณา ${DB.ads.length} รายการ</p>
     </div>
   </div>
+
+  ${cloudCard()}
 
   <div class="card">
     <h3>ช่องทางขาย &amp; ค่า GP <small>แก้ไขแล้วกดบันทึก — มีผลกับออเดอร์ใหม่เท่านั้น ออเดอร์เก่าใช้ค่า GP ณ วันที่บันทึก</small></h3>
@@ -1261,6 +1274,7 @@ function renderSettings() {
     <div class="hint mt">💡 ตรวจสอบ % GP ตามสัญญาของร้านคุณกับแต่ละแอพ (มักอยู่ราว 25–35% และบางแอพเรียกเก็บ VAT 7% บนค่า GP เพิ่ม) · ถ้าแอพคิด GP จากราคาเต็มแม้ร้านจะออกส่วนลดเอง ให้ติ๊ก "คิด GP จากยอดก่อนหักส่วนลด"</div>
   </div>`;
 
+  bindCloudCard();
   $('#saveShop').onclick = () => {
     const f = readForm($('#shopForm'));
     Object.assign(S, { shopName: f.shopName.trim() || 'ร้านของฉัน', targetFoodCost: num(f.targetFoodCost), targetMargin: num(f.targetMargin), dishesPerMonth: Math.max(1, num(f.dishesPerMonth)) });
@@ -1312,6 +1326,181 @@ function renderSettings() {
   };
 }
 
+/* =========================================================
+ * ใช้งานหลายเครื่อง (Firebase): หน้าล็อกอิน / สถานะ / การตั้งค่า
+ * ========================================================= */
+function updateSyncStatus() {
+  const el = $('#syncStatus');
+  if (!Sync.cfg) { el.hidden = true; return; }
+  el.hidden = false;
+  const off = !Sync.online;
+  el.classList.toggle('offline', off || !Sync.active);
+  el.innerHTML = `<i class="dot"></i><span>${Sync.active ? (off ? 'ออฟไลน์ · จะซิงก์เมื่อมีเน็ต' : 'ออนไลน์ · ' + esc(Sync.email)) : Sync.user ? esc(Sync.email) + ' · ยังไม่พร้อม' : 'ยังไม่ได้เข้าสู่ระบบ'}</span>`;
+}
+
+function renderCloudGate() {
+  const st = Sync.state;
+  const wrap = (inner) => { main.innerHTML = `<div class="gate"><div class="card">${inner}</div></div>`; };
+  const errBox = '<div class="alert bad" id="gateErr" hidden></div>';
+  const showErr = (e) => { const b = $('#gateErr'); b.hidden = false; b.textContent = authMessage(e); };
+  const disconnectBtn = '<button class="btn sm" id="gateDisconnect">เลิกใช้ออนไลน์ในเครื่องนี้</button>';
+  const bindDisconnect = () => { const b = $('#gateDisconnect'); if (b) b.onclick = async () => { if (!await askConfirm('เลิกเชื่อมต่อฐานข้อมูลออนไลน์ในเครื่องนี้?\nข้อมูลบนออนไลน์ไม่ถูกลบ และเชื่อมต่อใหม่ได้ภายหลัง')) return; Sync.disconnect(); render(); }; };
+
+  if (st === 'loading' || st === 'connecting' || st === 'off') {
+    wrap(`<div class="spinner"></div><p class="muted" style="text-align:center;margin:0">${st === 'connecting' ? 'กำลังโหลดข้อมูลร้าน…' : 'กำลังเชื่อมต่อฐานข้อมูลออนไลน์…'}</p>`);
+    return;
+  }
+  if (st === 'login') {
+    wrap(`<h2>เข้าสู่ระบบร้าน</h2>
+      <p class="small muted" style="margin:0">ใช้อีเมลและรหัสผ่านของคุณ ทุกเครื่องที่เข้าสู่ระบบจะเห็นข้อมูลร้านชุดเดียวกัน</p>
+      <form id="loginForm" class="form-grid" style="grid-template-columns:1fr">
+        ${fInput('email', 'อีเมล', '', { type: 'email' })}
+        ${fInput('password', 'รหัสผ่าน (อย่างน้อย 6 ตัว)', '', { type: 'password' })}
+        ${errBox}
+        <button class="btn primary lg" type="submit">เข้าสู่ระบบ</button>
+      </form>
+      <div class="actions"><button class="btn sm" id="signup">สมัครบัญชีใหม่</button><button class="btn sm" id="forgot">ลืมรหัสผ่าน</button>${disconnectBtn}</div>
+      <p class="small muted" style="margin:0">พนักงาน: สมัครด้วยอีเมลของตัวเอง แล้วแจ้งให้เจ้าของร้านเพิ่มอีเมลนี้ในหน้าตั้งค่า</p>`);
+    const f = $('#loginForm');
+    const vals = () => readForm(f);
+    f.onsubmit = async (e) => { e.preventDefault(); const v = vals(); try { await Sync.login(v.email, v.password); } catch (err) { showErr(err); } };
+    $('#signup').onclick = async () => { const v = vals(); try { await Sync.signup(v.email, v.password); toast('สมัครแล้ว กรุณาเปิดอีเมลเพื่อยืนยัน'); } catch (err) { showErr(err); } };
+    $('#forgot').onclick = async () => { const v = vals(); if (!v.email) return showErr({ code: 'auth/missing-email' }); try { await Sync.resetPassword(v.email); toast('ส่งลิงก์ตั้งรหัสผ่านใหม่ไปที่อีเมลแล้ว'); } catch (err) { showErr(err); } };
+    bindDisconnect();
+    return;
+  }
+  if (st === 'verify') {
+    wrap(`<h2>ยืนยันอีเมลก่อนเริ่มใช้งาน</h2>
+      <p style="margin:0">เราส่งลิงก์ยืนยันไปที่ <b>${esc(Sync.email)}</b> แล้ว เปิดอีเมล (ดูในโฟลเดอร์ Spam ด้วย) กดลิงก์ยืนยัน แล้วกลับมากดปุ่มด้านล่าง</p>
+      ${errBox}
+      <button class="btn primary lg" id="verified">ฉันยืนยันอีเมลแล้ว</button>
+      <div class="actions"><button class="btn sm" id="resend">ส่งอีเมลอีกครั้ง</button><button class="btn sm" id="logout">ออกจากระบบ</button></div>`);
+    $('#verified').onclick = async () => { try { if (!await Sync.checkVerified()) showErr({ code: 'not-verified' }); } catch (err) { showErr(err); } };
+    $('#resend').onclick = async () => { try { await Sync.resend(); toast('ส่งอีเมลยืนยันอีกครั้งแล้ว'); } catch (err) { showErr(err); } };
+    $('#logout').onclick = () => Sync.logout();
+    return;
+  }
+  if (st === 'denied') {
+    wrap(`<h2>บัญชีนี้ยังเข้าถึงข้อมูลร้านไม่ได้</h2>
+      <p style="margin:0">เข้าสู่ระบบเป็น <b>${esc(Sync.email)}</b></p>
+      <div class="alert info"><div><b>ถ้าคุณเป็นพนักงาน:</b> แจ้งเจ้าของร้านให้เพิ่มอีเมล <b>${esc(Sync.email)}</b> ที่หน้า ตั้งค่า → ใช้งานหลายเครื่อง แล้วกด "ลองใหม่"</div></div>
+      <div class="alert warn"><div><b>ถ้าคุณเป็นเจ้าของร้านและเพิ่งตั้งค่าครั้งแรก:</b> ทำขั้นตอนสุดท้าย
+        <ol style="margin:6px 0 0;padding-left:18px"><li>เปิด Firebase Console → Firestore Database → แท็บ <b>Rules</b></li><li>ลบของเดิมทั้งหมด แล้ววางกฎด้านล่าง (ใส่อีเมลคุณไว้ให้แล้ว)</li><li>กด <b>Publish</b> รอ 1 นาที แล้วกด "ลองใหม่"</li></ol></div></div>
+      <pre class="code" id="rulesText">${esc(Sync.rules(Sync.email))}</pre>
+      <div class="actions"><button class="btn" id="copyRules">คัดลอกกฎ</button><button class="btn primary" id="retry">ลองใหม่</button><button class="btn sm" id="logout">ออกจากระบบ</button></div>`);
+    $('#copyRules').onclick = () => copyText(Sync.rules(Sync.email), 'คัดลอกกฎแล้ว');
+    $('#retry').onclick = () => Sync.subscribe();
+    $('#logout').onclick = () => Sync.logout();
+    return;
+  }
+  if (st === 'onboard') {
+    const lc = Sync.localCopy || defaultData();
+    const hasLocal = lc.menus.length || lc.orders.length || lc.ingredients.length;
+    wrap(`<h2>ฐานข้อมูลออนไลน์พร้อมแล้ว 🎉</h2>
+      <p style="margin:0">ตอนนี้ยังไม่มีข้อมูลร้านบนออนไลน์ คุณ (<b>${esc(Sync.email)}</b>) จะเป็น <b>เจ้าของร้าน</b> เลือกวิธีเริ่มต้น:</p>
+      ${hasLocal ? `<button class="btn primary lg" data-init="local">อัปโหลดข้อมูลจากเครื่องนี้<br><small>เมนู ${lc.menus.length} · วัตถุดิบ ${lc.ingredients.length} · ออเดอร์ ${lc.orders.length}</small></button>` : ''}
+      <button class="btn ${hasLocal ? '' : 'primary lg'}" data-init="empty">เริ่มต้นใหม่ (ว่างเปล่า)</button>
+      <button class="btn" data-init="demo">เริ่มด้วยข้อมูลตัวอย่าง</button>`);
+    $$('[data-init]').forEach((b) => b.onclick = () => { Sync.initCloud(b.dataset.init); toast('เริ่มใช้งานออนไลน์แล้ว'); render(); });
+    return;
+  }
+  wrap(`<h2>เชื่อมต่อไม่สำเร็จ</h2><div class="alert bad"><div>${esc(Sync.error)}</div></div>
+    <div class="hint">ถ้าเพิ่งตั้งค่า ตรวจว่าได้สร้าง <b>Firestore Database</b> และเปิด <b>Authentication → Email/Password</b> ใน Firebase แล้ว</div>
+    <div class="actions"><button class="btn primary" id="retry">ลองใหม่</button>${disconnectBtn}</div>`);
+  $('#retry').onclick = () => { if (Sync.user) Sync.subscribe(); else location.reload(); };
+  bindDisconnect();
+}
+
+function authMessage(e) {
+  const map = {
+    'auth/invalid-email': 'รูปแบบอีเมลไม่ถูกต้อง',
+    'auth/missing-email': 'กรุณากรอกอีเมล',
+    'auth/missing-password': 'กรุณากรอกรหัสผ่าน',
+    'auth/weak-password': 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร',
+    'auth/email-already-in-use': 'อีเมลนี้สมัครไว้แล้ว ให้กด "เข้าสู่ระบบ" แทน',
+    'auth/invalid-credential': 'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
+    'auth/invalid-login-credentials': 'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
+    'auth/wrong-password': 'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
+    'auth/user-not-found': 'ไม่พบบัญชีนี้ ให้กด "สมัครบัญชีใหม่"',
+    'auth/too-many-requests': 'ลองหลายครั้งเกินไป รอสักครู่แล้วลองใหม่',
+    'auth/network-request-failed': 'ไม่มีอินเทอร์เน็ต หรือเชื่อมต่อไม่ได้',
+    'auth/operation-not-allowed': 'ยังไม่ได้เปิดการเข้าสู่ระบบด้วย Email/Password ใน Firebase (Authentication → Sign-in method)',
+    'not-verified': 'ยังไม่ได้ยืนยันอีเมล กดลิงก์ในอีเมลก่อน แล้วลองอีกครั้ง',
+  };
+  return map[e && e.code] || ('เกิดข้อผิดพลาด: ' + (e && (e.message || e.code) || e));
+}
+
+function cloudCard() {
+  if (!Sync.cfg) {
+    return `<div class="card">
+      <h3>☁️ ใช้งานหลายเครื่อง <small>ยังไม่ได้เชื่อมต่อ (ข้อมูลอยู่ในเครื่องนี้เท่านั้น)</small></h3>
+      <p class="small" style="margin-top:0">เชื่อมต่อฐานข้อมูลออนไลน์ Firebase (ฟรี) เพื่อให้มือถือ คอมพิวเตอร์ และพนักงานทุกคนเห็นข้อมูลร้านชุดเดียวกันแบบเรียลไทม์ ทำตาม<a href="https://github.com/Dreamizc/mine/blob/claude/food-delivery-management-system-mndd1a/docs/firebase-setup.md" target="_blank" rel="noopener">คู่มือตั้งค่า Firebase</a> แล้ววางค่า <code>firebaseConfig</code> ที่ได้ลงด้านล่าง</p>
+      <label class="field"><span>ค่า firebaseConfig (คัดลอกจาก Firebase Console ทั้งก้อน)</span>
+        <textarea class="input" id="fbConfig" rows="6" placeholder="const firebaseConfig = {&#10;  apiKey: &quot;...&quot;,&#10;  authDomain: &quot;...&quot;,&#10;  projectId: &quot;...&quot;,&#10;  ...&#10;};" style="font-family:monospace;font-size:12px"></textarea></label>
+      <div class="actions mt"><button class="btn primary" id="fbConnect">เชื่อมต่อ</button></div>
+      <p class="small muted">ข้อมูลที่มีอยู่ในเครื่องนี้จะอัปโหลดขึ้นออนไลน์ได้ในขั้นตอนถัดไป</p>
+    </div>`;
+  }
+  const owner = Sync.isOwner;
+  return `<div class="card">
+    <h3>☁️ ใช้งานหลายเครื่อง <small>${Sync.online ? '🟢 ออนไลน์' : '🟠 ออฟไลน์ (บันทึกต่อได้ จะซิงก์ให้เมื่อมีเน็ต)'}</small></h3>
+    <p class="small" style="margin-top:0">เข้าสู่ระบบเป็น <b>${esc(Sync.email)}</b> ${owner ? '<span class="badge primary">เจ้าของร้าน</span>' : '<span class="badge">พนักงาน</span>'} · โปรเจกต์ ${esc(Sync.cfg.projectId)}</p>
+    <div class="grid g2">
+      <div>
+        <div class="section-title" style="margin-top:0">เพิ่มเครื่องใหม่</div>
+        <p class="small" style="margin-top:0">เปิดลิงก์นี้บนมือถือ/คอมพิวเตอร์เครื่องอื่น แล้วเข้าสู่ระบบ</p>
+        <div class="inline"><button class="btn" id="copyLink">คัดลอกลิงก์เชื่อมต่อ</button></div>
+        ${location.protocol === 'file:' ? '<p class="small muted">ตอนนี้เปิดจากไฟล์ในเครื่อง ลิงก์จะใช้ได้กับเครื่องนี้เท่านั้น แนะนำให้นำไฟล์ขึ้นเว็บ (ดูคู่มือ) เพื่อเปิดจากมือถือได้</p>' : ''}
+        <div class="section-title">ข้อมูลย้อนหลังที่โหลด</div>
+        <div class="inline"><input class="input num" id="cloudDays" value="${Sync.days()}" style="width:90px" inputmode="numeric"> วัน <button class="btn sm" id="saveDays">บันทึก</button></div>
+        <p class="small muted">ออเดอร์/ค่าโฆษณา/การซื้อ เก่ากว่านี้ยังเก็บอยู่บนออนไลน์ แต่ไม่โหลดมาแสดง เพื่อให้เปิดแอปเร็วและอยู่ในโควตาฟรี</p>
+      </div>
+      <div>
+        <div class="section-title" style="margin-top:0">พนักงานที่เข้าใช้ได้</div>
+        ${owner ? `<div class="inline"><input class="input" id="memberEmail" type="email" placeholder="อีเมลพนักงาน" style="flex:1;min-width:0"><button class="btn primary" id="addMember">เพิ่ม</button></div>` : ''}
+        <div class="mt">${Sync.members.length ? Sync.members.map((m) => `<div class="inline" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span class="small">${esc(m)}</span>${owner ? `<button class="btn sm danger" data-rmmember="${esc(m)}">นำออก</button>` : ''}</div>`).join('') : '<div class="small muted">ยังไม่มีพนักงาน</div>'}</div>
+        <p class="small muted">พนักงานสมัครด้วยอีเมลของตัวเองในหน้าเข้าสู่ระบบ บันทึกออเดอร์/วัตถุดิบ/เมนูได้ แต่แก้การตั้งค่าร้านและ GP ได้เฉพาะเจ้าของร้าน</p>
+      </div>
+    </div>
+    ${owner ? `<details class="mt"><summary class="small">กฎความปลอดภัย Firestore (ใช้ตอนตั้งค่าครั้งแรก)</summary><pre class="code mt">${esc(Sync.rules(Sync.ownerEmail))}</pre><button class="btn sm mt" id="copyRules2">คัดลอกกฎ</button></details>` : ''}
+    <div class="actions mt"><button class="btn" id="cloudLogout">ออกจากระบบ</button><button class="btn danger" id="cloudDisconnect">เลิกใช้ออนไลน์ในเครื่องนี้</button></div>
+  </div>`;
+}
+
+function bindCloudCard() {
+  const c = $('#fbConnect');
+  if (c) c.onclick = () => {
+    const cfg = Sync.parseConfig($('#fbConfig').value);
+    if (!cfg) return toast('ค่าที่วางไม่ครบ ต้องมี apiKey, authDomain และ projectId', 'error');
+    Sync.saveCfg(cfg);
+    Sync.start();
+  };
+  if (!Sync.active) return;
+  $('#copyLink').onclick = () => copyText(Sync.connectLink(), 'คัดลอกลิงก์แล้ว ส่งให้เครื่องอื่นเปิดได้เลย');
+  $('#saveDays').onclick = () => {
+    const d = Math.max(7, Math.round(num($('#cloudDays').value)));
+    try { localStorage.setItem(DAYS_KEY, String(d)); } catch (e) { /* ignore */ }
+    toast(`โหลดข้อมูลย้อนหลัง ${d} วัน`);
+    Sync.subscribe();
+  };
+  const add = $('#addMember');
+  if (add) add.onclick = async () => {
+    const email = $('#memberEmail').value.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return toast('รูปแบบอีเมลไม่ถูกต้อง', 'error');
+    try { await Sync.addMember(email); toast('เพิ่มพนักงานแล้ว'); } catch (e) { toast('เพิ่มไม่สำเร็จ: ' + e.message, 'error'); }
+  };
+  $$('[data-rmmember]').forEach((b) => b.onclick = async () => {
+    if (!await askConfirm(`นำ ${b.dataset.rmmember} ออก? บัญชีนี้จะเข้าดูข้อมูลร้านไม่ได้อีก`, 'นำออก')) return;
+    Sync.removeMember(b.dataset.rmmember).catch((e) => toast('ไม่สำเร็จ: ' + e.message, 'error'));
+  });
+  const cr = $('#copyRules2'); if (cr) cr.onclick = () => copyText(Sync.rules(Sync.ownerEmail), 'คัดลอกกฎแล้ว');
+  $('#cloudLogout').onclick = () => Sync.logout();
+  $('#cloudDisconnect').onclick = async () => {
+    if (!await askConfirm('เลิกใช้ออนไลน์ในเครื่องนี้?\nข้อมูลล่าสุดจะเก็บไว้ในเครื่องนี้ และข้อมูลบนออนไลน์ไม่ถูกลบ')) return;
+    Sync.disconnect(); toast('เลิกเชื่อมต่อแล้ว'); render();
+  };
+}
+
 /* ---------- Theme ---------- */
 function applyTheme() {
   let t = 'auto';
@@ -1327,6 +1516,8 @@ const PAGES = {
 };
 let lastPage = null;
 function render() {
+  updateSyncStatus();
+  if (Sync.cfg && !Sync.active) { $$('#nav a').forEach((a) => a.classList.remove('active')); renderCloudGate(); return; }
   const page = PAGES[location.hash.slice(1)] ? location.hash.slice(1) : 'dashboard';
   $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
   $('#shopName').textContent = DB.settings.shopName;
@@ -1337,8 +1528,10 @@ function render() {
   if (page !== lastPage) { scrollTo(0, 0); lastPage = page; }
 }
 addEventListener('hashchange', render);
-addEventListener('storage', (e) => { if (e.key === DB_KEY) { Store.load(); render(); } });
+addEventListener('storage', (e) => { if (e.key === DB_KEY && !Sync.cfg) { Store.load(); render(); } });
 
 Store.load();
+Sync.loadCfg();
 applyTheme();
 render();
+Sync.start();
