@@ -20,6 +20,17 @@ function buildDemoData() {
     ing('i-noodle', 'เส้นใหญ่', 'ของแห้ง', 'กรัม', 40, 1000, 'กก.', 100, 3000, 2000),
     ing('i-oil', 'น้ำมันพืช', 'เครื่องปรุง', 'มล.', 55, 1000, 'ขวด 1 ลิตร', 100, 6000, 2000),
     ing('i-sauce', 'ซอสปรุงรส (รวม)', 'เครื่องปรุง', 'มล.', 45, 700, 'ขวด', 100, 3500, 1000),
+    ing('i-fishsauce', 'น้ำปลา', 'เครื่องปรุง', 'มล.', 38, 700, 'ขวด', 100, 2800, 700),
+    ing('i-sugar', 'น้ำตาลทราย', 'เครื่องปรุง', 'กรัม', 28, 1000, 'ถุง 1 กก.', 100, 3000, 1000),
+    ing('i-oyster', 'ซอสหอยนางรม', 'เครื่องปรุง', 'กรัม', 65, 770, 'ขวด', 100, 3080, 770),
+    ing('i-darksoy', 'ซีอิ๊วดำ', 'เครื่องปรุง', 'มล.', 35, 300, 'ขวด', 100, 600, 300),
+  ];
+
+  // ส่วนผสมทำเอง: ซอสกะเพรา 1 สูตร (ผสมแล้วเคี่ยว) ได้ 650 กรัม
+  d.preps = [
+    { id: 'p-kapraosauce', name: 'ซอสกะเพรา (ทำเอง)', category: 'ซอส', unit: 'กรัม', yieldQty: 650,
+      items: [{ id: 'i-fishsauce', qty: 200 }, { id: 'i-oyster', qty: 300 }, { id: 'i-sugar', qty: 150 }, { id: 'i-darksoy', qty: 50 }],
+      trackStock: true, stock: 900, minStock: 300 },
   ];
 
   const exp = (id, name, type, amount, unit, category) => ({ id, name, type, amount, unit, category });
@@ -40,7 +51,7 @@ function buildDemoData() {
 
   d.menus = [
     { id: 'm-kaprao', name: 'กะเพราหมูสับไข่ดาว', category: 'จานเดียว', price: 69, channelPrices: { grab: 89, lineman: 89, shopee: 89 }, active: true,
-      ingredients: [{ id: 'i-pork', qty: 100 }, { id: 'i-rice', qty: 110 }, { id: 'i-egg', qty: 1 }, { id: 'i-basil', qty: 15 }, { id: 'i-garlic', qty: 8 }, { id: 'i-chili', qty: 5 }, { id: 'i-oil', qty: 25 }, { id: 'i-sauce', qty: 15 }],
+      ingredients: [{ id: 'i-pork', qty: 100 }, { id: 'i-rice', qty: 110 }, { id: 'i-egg', qty: 1 }, { id: 'i-basil', qty: 15 }, { id: 'i-garlic', qty: 8 }, { id: 'i-chili', qty: 5 }, { id: 'i-oil', qty: 25 }, { id: 'p-kapraosauce', qty: 20 }],
       expenses: [...pack, ...overhead] },
     { id: 'm-friedrice', name: 'ข้าวผัดหมู', category: 'จานเดียว', price: 65, channelPrices: { grab: 85, lineman: 85, shopee: 85 }, active: true,
       ingredients: [{ id: 'i-porksl', qty: 80 }, { id: 'i-rice', qty: 140 }, { id: 'i-egg', qty: 1 }, { id: 'i-garlic', qty: 5 }, { id: 'i-oil', qty: 20 }, { id: 'i-sauce', qty: 15 }],
@@ -96,6 +107,10 @@ function buildDemoData() {
     d.ads.push({ id: uid() + 'g' + day, date, channelId: 'grab', amount: 150, note: 'โฆษณาร้านแนะนำ' });
     if (day % 2 === 0) d.ads.push({ id: uid() + 'l' + day, date, channelId: 'lineman', amount: 100, note: 'Boost ร้าน' });
   }
+  d.productions = [
+    { id: uid() + 'pr1', date: addDays(t, -1), prepId: 'p-kapraosauce', name: 'ซอสกะเพรา (ทำเอง)', batches: 2, output: 1300,
+      cost: round2(prepBatchCost(d.preps[0]) * 2), usage: stockUsage(d.preps[0].items, 2), note: 'ทำตอนเช้า', createdAt: Date.now() },
+  ];
   DB = prevDB;
 
   d.purchases = [

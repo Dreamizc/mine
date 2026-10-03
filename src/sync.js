@@ -15,8 +15,8 @@ const CFG_KEY = 'rms-firebase-config';
 const DAYS_KEY = 'rms-cloud-days';
 
 const Sync = {
-  COLS: ['ingredients', 'purchases', 'expenses', 'menus', 'orders', 'ads'],
-  WINDOWED: ['orders', 'ads', 'purchases'], // โหลดเฉพาะช่วงวันล่าสุด เพื่อประหยัดโควตาการอ่าน
+  COLS: ['ingredients', 'preps', 'productions', 'purchases', 'expenses', 'menus', 'orders', 'ads'],
+  WINDOWED: ['orders', 'ads', 'purchases', 'productions'], // โหลดเฉพาะช่วงวันล่าสุด เพื่อประหยัดโควตาการอ่าน
   cfg: null,
   state: 'off', // off | loading | login | verify | connecting | onboard | denied | error | ready
   error: '',
@@ -189,7 +189,7 @@ const Sync = {
         const old = prev.get(r.id);
         if (json === old) return;
         const ref = this.fs.collection(col).doc(r.id);
-        if (col === 'ingredients' && old) {
+        if ((col === 'ingredients' || col === 'preps') && old) {
           // สต็อกใช้การบวก/ลบแบบสะสม เพื่อไม่ให้หลายเครื่องตัดสต็อกพร้อมกันแล้วทับกัน
           const { stock, ...rest } = strip(r);
           const delta = round2(num(stock) - num(JSON.parse(old).stock));

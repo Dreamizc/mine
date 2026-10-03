@@ -13,6 +13,8 @@ const round2 = (n) => Math.round((num(n) + Number.EPSILON) * 100) / 100;
 const fmt = (n, d = 2) => (Number(n) || 0).toLocaleString('th-TH', { minimumFractionDigits: d, maximumFractionDigits: d });
 const baht = (n) => (num(n) < -0.004 ? '-฿' : '฿') + fmt(Math.abs(num(n)));
 const baht0 = (n) => (num(n) < -0.5 ? '-฿' : '฿') + fmt(Math.abs(num(n)), 0);
+/** ราคาต่อหน่วยเล็ก (เช่น ต่อกรัม) แสดงทศนิยม 4 ตำแหน่งเมื่อต่ำกว่า 1 บาท */
+const bahtU = (n) => (num(n) && Math.abs(num(n)) < 1 ? '฿' + fmt(n, 4) : baht(n));
 const pct = (n) => fmt(n, 1) + '%';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const byId = (arr, id) => arr.find((x) => x.id === id);
@@ -49,6 +51,8 @@ function defaultData() {
       { id: 'robinhood', name: 'Robinhood', gp: 0, vatOnGp: false, gpBeforeDiscount: true, active: true },
     ],
     ingredients: [],
+    preps: [], // ส่วนผสมทำเอง (สูตรย่อย) เช่น ซอสกะเพรา น้ำจิ้ม หมูหมัก
+    productions: [], // บันทึกการทำส่วนผสม (ตัดวัตถุดิบ เพิ่มสต็อกส่วนผสม)
     purchases: [],
     expenses: [],
     menus: [],
@@ -98,6 +102,59 @@ function expUnitCost(exp) {
   return num(exp.amount);
 }
 
+/* ---------- ส่วนผสมทำเอง (สูตรย่อย) ---------- */
+const PREP_MAX_DEPTH = 6; // กันวนซ้ำไม่รู้จบ กรณีสูตรอ้างถึงกันเอง
+const prepById = (id) => byId(DB.preps || [], id);
+/** วัตถุดิบ หรือ ส่วนผสมทำเอง ตาม id (ใช้ในสูตรเมนู/สูตรส่วนผสม) */
+const stockItemById = (id) => byId(DB.ingredients, id) || prepById(id);
+
+/** ต้นทุนต่อ 1 หน่วยของรายการในสูตร (วัตถุดิบ หรือ ส่วนผสมทำเอง) */
+function itemUnitCost(id, depth = 0) {
+  const i = byId(DB.ingredients, id);
+  if (i) return ingUnitCost(i);
+  const p = prepById(id);
+  return p ? prepUnitCost(p, depth) : 0;
+}
+/** ต้นทุนการทำ 1 ครั้ง (1 สูตร) */
+function prepBatchCost(p, depth = 0) {
+  if (depth > PREP_MAX_DEPTH) return 0;
+  return (p.items || []).reduce((s, r) => s + itemUnitCost(r.id, depth + 1) * num(r.qty), 0);
+}
+/** ต้นทุนต่อ 1 หน่วยของส่วนผสม = ต้นทุนทั้งสูตร ÷ ปริมาณที่ได้ */
+function prepUnitCost(p, depth = 0) {
+  const y = num(p.yieldQty);
+  return y > 0 ? prepBatchCost(p, depth) / y : 0;
+}
+/** สูตร p ใช้ targetId อยู่ (ทั้งทางตรงและทางอ้อม) หรือไม่ */
+function prepUses(p, targetId, depth = 0) {
+  if (!p || depth > PREP_MAX_DEPTH) return false;
+  return (p.items || []).some((r) => r.id === targetId || prepUses(prepById(r.id), targetId, depth + 1));
+}
+/**
+ * แปลงสูตรเป็นรายการตัดสต็อก: วัตถุดิบตัดตรงๆ, ส่วนผสมที่ติดตามสต็อกตัดที่ตัวส่วนผสม,
+ * ส่วนผสมที่ไม่ติดตามสต็อกแตกเป็นวัตถุดิบตามสัดส่วนที่ใช้
+ */
+function stockUsage(rows, mult = 1, depth = 0, out = []) {
+  if (depth > PREP_MAX_DEPTH) return out;
+  (rows || []).forEach((r) => {
+    const q = num(r.qty) * mult;
+    if (!q) return;
+    if (byId(DB.ingredients, r.id)) { out.push({ id: r.id, qty: q }); return; }
+    const p = prepById(r.id);
+    if (!p) return;
+    if (p.trackStock || !(num(p.yieldQty) > 0)) out.push({ id: p.id, qty: q });
+    else stockUsage(p.items, q / num(p.yieldQty), depth + 1, out);
+  });
+  return out;
+}
+/** ตัด/คืนสต็อกตามรายการ usage (sign = 1 ตัด, -1 คืน) */
+function applyUsage(usage, sign, mult = 1) {
+  (usage || []).forEach((u) => {
+    const i = stockItemById(u.id);
+    if (i && i.trackStock) i.stock = Math.round((num(i.stock) - sign * num(u.qty) * mult) * 10000) / 10000;
+  });
+}
+
 function fixedMonthlyTotal() {
   return DB.expenses.filter((e) => e.type === 'monthly').reduce((s, e) => s + num(e.amount), 0);
 }
@@ -109,11 +166,12 @@ function menuCost(m) {
   let ing = 0, unitExp = 0, overhead = 0;
   const lines = [];
   (m.ingredients || []).forEach((r) => {
-    const i = byId(DB.ingredients, r.id);
+    const i = stockItemById(r.id);
     if (!i) return;
-    const c = ingUnitCost(i) * num(r.qty);
+    const isPrep = !byId(DB.ingredients, r.id);
+    const c = itemUnitCost(r.id) * num(r.qty);
     ing += c;
-    lines.push({ kind: 'ing', name: i.name, qty: num(r.qty), unit: i.unit, cost: c });
+    lines.push({ kind: isPrep ? 'prep' : 'ing', name: i.name, qty: num(r.qty), unit: i.unit, cost: c });
   });
   (m.expenses || []).forEach((r) => {
     const e = byId(DB.expenses, r.id);
@@ -176,18 +234,13 @@ function snapshotItem(menuId, qty, price) {
   return {
     menuId, name: m ? m.name : '(เมนูถูกลบ)', qty: num(qty), price: num(price),
     varCost: round2(c.variable), fullCost: round2(c.full),
-    usage: m ? (m.ingredients || []).map((r) => ({ id: r.id, qty: num(r.qty) })) : [],
+    usage: m ? stockUsage(m.ingredients) : [],
   };
 }
 
 /** ตัด/คืนสต็อกวัตถุดิบตามออเดอร์ (sign = 1 ตัด, -1 คืน) */
 function applyStock(order, sign) {
-  order.items.forEach((it) => {
-    (it.usage || []).forEach((u) => {
-      const i = byId(DB.ingredients, u.id);
-      if (i && i.trackStock) i.stock = round2(num(i.stock) - sign * u.qty * num(it.qty));
-    });
-  });
+  order.items.forEach((it) => applyUsage(it.usage, sign, num(it.qty)));
 }
 
 /** รวมข้อมูลรายงานช่วงวันที่ from..to */
@@ -266,6 +319,6 @@ function downloadFile(name, content, type) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
 }
 function toCSV(rows) {
-  const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const cell = (v) => { let s = String(v ?? ''); if (typeof v === 'string' && /^[=+\-@]/.test(s)) s = "'" + s; return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   return '﻿' + rows.map((r) => r.map(cell).join(',')).join('\n');
 }

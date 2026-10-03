@@ -27,7 +27,11 @@ const Modal = { onSave: null };
 function openModal({ title, body, saveText = 'บันทึก', wide = false, onSave, onMount, hideSave = false }) {
   const dlg = $('#modal');
   $('#modalTitle').textContent = title;
-  $('#modalBody').innerHTML = body;
+  // สร้างกล่องเนื้อหาใหม่ทุกครั้ง เพื่อล้าง event listener ของหน้าต่างก่อนหน้า
+  const oldBody = $('#modalBody');
+  const fresh = oldBody.cloneNode(false);
+  oldBody.replaceWith(fresh);
+  fresh.innerHTML = body;
   $('#modalSave').textContent = saveText;
   $('#modalSave').hidden = hideSave;
   dlg.classList.toggle('wide', wide);
@@ -80,6 +84,18 @@ function readForm(root) {
   return o;
 }
 const datalist = (id, values) => `<datalist id="${id}">${[...new Set(values.filter(Boolean))].map((v) => `<option value="${esc(v)}">`).join('')}</datalist>`;
+/** ตัวเลือก วัตถุดิบ + ส่วนผสมทำเอง (ไม่รวมสูตรที่จะทำให้วนอ้างถึงตัวเอง) */
+function stockItemOptions(sel, selfId) {
+  const ings = DB.ingredients.map((i) => opt(i.id, `${i.name} (${bahtU(ingUnitCost(i))}/${i.unit})`, sel)).join('');
+  const preps = (DB.preps || []).filter((p) => !selfId || (p.id !== selfId && !prepUses(p, selfId)))
+    .map((p) => opt(p.id, `🥣 ${p.name} (${bahtU(prepUnitCost(p))}/${p.unit})`, sel)).join('');
+  return `<option value="">— เลือกวัตถุดิบ / ส่วนผสม —</option>${ings ? `<optgroup label="วัตถุดิบ">${ings}</optgroup>` : ''}${preps ? `<optgroup label="ส่วนผสมทำเอง">${preps}</optgroup>` : ''}`;
+}
+/** ข้อความต้นทุนท้ายแถวในตัวแก้สูตร */
+function stockRowText(id, q) {
+  const it = id && stockItemById(id);
+  return it ? `${it.unit} · ${baht(itemUnitCost(id) * q)}` : '';
+}
 const signCls = (n) => (n < 0 ? 'neg' : n > 0 ? 'pos' : '');
 const emptyState = (icon, text, extra = '') => `<div class="empty"><span class="big">${icon}</span>${text}${extra ? `<div class="mt">${extra}</div>` : ''}</div>`;
 const activeChannels = () => DB.channels.filter((c) => c.active !== false);
@@ -201,7 +217,7 @@ function renderDashboard() {
   const be = breakEven(aM);
   const isEmpty = !DB.menus.length && !DB.orders.length;
 
-  const lowStock = DB.ingredients.filter((i) => i.trackStock && num(i.stock) <= num(i.minStock));
+  const lowStock = [...DB.ingredients, ...(DB.preps || [])].filter((i) => i.trackStock && num(i.stock) <= num(i.minStock));
   const highCost = DB.menus.filter((m) => m.active !== false && num(m.price) > 0 && menuCost(m).variable / num(m.price) * 100 > num(DB.settings.targetFoodCost));
   const lossMenus = [];
   DB.menus.filter((m) => m.active !== false).forEach((m) => {
@@ -648,9 +664,8 @@ function renderMenus() {
 function menuModal(m) {
   const isNew = !m;
   m = m ? JSON.parse(JSON.stringify(m)) : { name: '', category: '', price: '', channelPrices: {}, ingredients: [], expenses: [], active: true };
-  const ingOptions = (sel) => `<option value="">— เลือกวัตถุดิบ —</option>` + DB.ingredients.map((i) => opt(i.id, `${i.name} (${baht(ingUnitCost(i))}/${i.unit})`, sel)).join('');
   const expOptions = (sel) => `<option value="">— เลือกค่าใช้จ่าย —</option>` + DB.expenses.map((e) => opt(e.id, `${e.name} (${e.type === 'monthly' ? 'ปันส่วน ' + baht(expUnitCost(e)) + '/จาน' : baht(e.amount) + '/' + (e.unit || 'หน่วย')})`, sel)).join('');
-  const ingRow = (r = {}) => `<div class="row-editor" data-row="ing"><select class="input" data-f="id">${ingOptions(r.id)}</select><input class="input num" data-f="qty" value="${esc(r.qty ?? '')}" placeholder="ปริมาณ" inputmode="decimal"><span class="rc"></span><button type="button" class="icon-btn" data-rm aria-label="ลบ">✕</button></div>`;
+  const ingRow = (r = {}) => `<div class="row-editor" data-row="ing"><select class="input" data-f="id">${stockItemOptions(r.id)}</select><input class="input num" data-f="qty" value="${esc(r.qty ?? '')}" placeholder="ปริมาณ" inputmode="decimal"><span class="rc"></span><button type="button" class="icon-btn" data-rm aria-label="ลบ">✕</button></div>`;
   const expRow = (r = {}) => `<div class="row-editor" data-row="exp"><select class="input" data-f="id">${expOptions(r.id)}</select><input class="input num" data-f="qty" value="${esc(r.qty ?? 1)}" placeholder="จำนวน" inputmode="decimal"><span class="rc"></span><button type="button" class="icon-btn" data-rm aria-label="ลบ">✕</button></div>`;
 
   const body = `
@@ -667,7 +682,7 @@ function menuModal(m) {
     ${activeChannels().map((ch) => fInput('cp_' + ch.id, `${esc(ch.name)} ${num(ch.gp) ? `<span class="muted">(GP ${fmt(ch.gp, 0)}%)</span>` : ''}`, m.channelPrices?.[ch.id] || '', { type: 'number', placeholder: 'ราคาหลัก' })).join('')}
   </div>
 
-  <div class="section-title">🥬 วัตถุดิบในเมนู (ปริมาณต่อ 1 จาน)</div>
+  <div class="section-title">🥬 วัตถุดิบ &amp; ส่วนผสมทำเอง ในเมนู (ปริมาณต่อ 1 จาน)</div>
   ${DB.ingredients.length ? '' : '<div class="alert warn">ยังไม่มีวัตถุดิบ — เพิ่มได้ที่หน้า วัตถุดิบ &amp; สต็อก</div>'}
   <div id="ingRows">${m.ingredients.map(ingRow).join('')}</div>
   <button type="button" class="btn sm" id="addIngRow">＋ เพิ่มวัตถุดิบ</button>
@@ -700,7 +715,7 @@ function menuModal(m) {
     $$('[data-row]', root).forEach((r) => {
       const id = $('[data-f=id]', r).value, q = num($('[data-f=qty]', r).value);
       let txt = '';
-      if (id && r.dataset.row === 'ing') { const i = byId(DB.ingredients, id); if (i) txt = `${i.unit} · ${baht(ingUnitCost(i) * q)}`; }
+      if (id && r.dataset.row === 'ing') txt = stockRowText(id, q);
       if (id && r.dataset.row === 'exp') { const e = byId(DB.expenses, id); if (e) txt = baht(expUnitCost(e) * q); }
       $('.rc', r).textContent = txt;
     });
@@ -764,10 +779,14 @@ function menuModal(m) {
 function renderIngredients() {
   const tabs = `<div class="seg" id="ingTabs">
     <button data-tab="list" class="${UI.ingTab === 'list' ? 'on' : ''}">🥬 รายการวัตถุดิบ</button>
+    <button data-tab="preps" class="${UI.ingTab === 'preps' ? 'on' : ''}">🥣 ส่วนผสมทำเอง</button>
     <button data-tab="purchases" class="${UI.ingTab === 'purchases' ? 'on' : ''}">🛒 ประวัติการซื้อ</button></div>`;
   const usedIn = (id) => DB.menus.filter((m) => (m.ingredients || []).some((r) => r.id === id)).length;
+  const usedInPreps = (id) => (DB.preps || []).filter((p) => (p.items || []).some((r) => r.id === id)).length;
+  const usedText = (id) => { const a = usedIn(id), b = usedInPreps(id); return `${a} เมนู${b ? `<div class="muted">${b} ส่วนผสม</div>` : ''}`; };
   let content;
-  if (UI.ingTab === 'list') {
+  if (UI.ingTab === 'preps') content = prepsContent(usedText);
+  else if (UI.ingTab === 'list') {
     content = DB.ingredients.length ? `<div class="table-wrap"><table>
       <thead><tr><th>วัตถุดิบ</th><th>ซื้อมาเป็น</th><th class="num">% ใช้ได้จริง</th><th class="num">ต้นทุนต่อหน่วย</th><th class="num">สต็อกคงเหลือ</th><th class="num">ใช้ใน</th><th></th></tr></thead>
       <tbody>${[...DB.ingredients].sort((a, b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name)).map((i) => {
@@ -776,9 +795,9 @@ function renderIngredients() {
         <td><b>${esc(i.name)}</b><div class="small muted">${esc(i.category || '')}</div></td>
         <td>${baht(i.packPrice)} / ${esc(i.packLabel || '')}<div class="small muted">= ${fmt(i.packSize, 0)} ${esc(i.unit)}</div></td>
         <td class="num">${fmt(i.yield || 100, 0)}%</td>
-        <td class="num"><b>${baht(ingUnitCost(i))}</b> <span class="small muted">/${esc(i.unit)}</span></td>
+        <td class="num"><b>${bahtU(ingUnitCost(i))}</b> <span class="small muted">/${esc(i.unit)}</span></td>
         <td class="num">${i.trackStock ? `${fmt(i.stock, 0)} ${esc(i.unit)} ${low ? '<span class="badge warn">ใกล้หมด</span>' : ''}` : '<span class="muted small">ไม่ติดตาม</span>'}</td>
-        <td class="num small">${usedIn(i.id)} เมนู</td>
+        <td class="num small">${usedText(i.id)}</td>
         <td class="actions-cell"><button class="btn sm" data-buy="${esc(i.id)}">🛒 ซื้อเข้า</button> <button class="btn sm" data-editing="${esc(i.id)}">แก้ไข</button> <button class="btn sm danger" data-deling="${esc(i.id)}">ลบ</button></td>
       </tr>`; }).join('')}</tbody></table></div>`
       : emptyState('🥬', 'ยังไม่มีวัตถุดิบ', '<button class="btn primary" data-addfirst>＋ เพิ่มวัตถุดิบแรก</button>');
@@ -799,26 +818,51 @@ function renderIngredients() {
   main.innerHTML = `
   <div class="page-head">
     <div><h1>วัตถุดิบ &amp; สต็อก</h1><p>บันทึกราคาวัตถุดิบ ระบบคิดต้นทุนต่อกรัม/ชิ้นหลังหักส่วนที่ตัดแต่งทิ้ง และตัดสต็อกอัตโนมัติเมื่อขาย</p></div>
-    <div class="actions">${tabs}<button class="btn" id="buyIng">🛒 บันทึกซื้อ</button><button class="btn primary" id="addIng">＋ เพิ่มวัตถุดิบ</button></div>
+    <div class="actions">${tabs}${UI.ingTab === 'preps'
+      ? '<button class="btn primary" id="addPrep">＋ เพิ่มสูตรส่วนผสม</button>'
+      : '<button class="btn" id="buyIng">🛒 บันทึกซื้อ</button><button class="btn primary" id="addIng">＋ เพิ่มวัตถุดิบ</button>'}</div>
   </div>
   <div class="card">${content}</div>
-  <div class="hint mt">💡 <b>% ใช้ได้จริง (Yield)</b> คือสัดส่วนที่เหลือหลังตัดแต่ง เช่น ซื้อผักคะน้า 1 กก. เด็ดใบเสียทิ้งเหลือ 750 กรัม = 75% ต้นทุนต่อกรัมจะสูงขึ้นตามจริง · การ<b>บันทึกซื้อ</b>จะเพิ่มสต็อกและอัปเดตราคาล่าสุดให้อัตโนมัติ</div>`;
+  ${UI.ingTab === 'preps' ? `<div class="hint mt">💡 <b>ส่วนผสมทำเอง</b> เช่น ซอสกะเพรา น้ำจิ้ม หมูหมัก: ใส่วัตถุดิบที่ใช้ทำ 1 สูตร และปริมาณที่ได้ ระบบคิดต้นทุนต่อกรัมให้ แล้วนำไปใส่ในเมนูได้เหมือนวัตถุดิบ · ถ้า<b>ติดตามสต็อก</b> ให้กด "ทำเพิ่ม" ทุกครั้งที่ทำ ระบบจะตัดวัตถุดิบและเพิ่มสต็อกส่วนผสม แล้วตัดสต็อกส่วนผสมเมื่อขาย · ถ้า<b>ไม่ติดตาม</b> ระบบจะตัดวัตถุดิบตามสัดส่วนตอนขายแทน</div>` : `<div class="hint mt">💡 <b>% ใช้ได้จริง (Yield)</b> คือสัดส่วนที่เหลือหลังตัดแต่ง เช่น ซื้อผักคะน้า 1 กก. เด็ดใบเสียทิ้งเหลือ 750 กรัม = 75% ต้นทุนต่อกรัมจะสูงขึ้นตามจริง · การ<b>บันทึกซื้อ</b>จะเพิ่มสต็อกและอัปเดตราคาล่าสุดให้อัตโนมัติ</div>`}`;
 
   $$('#ingTabs button').forEach((b) => b.onclick = () => { UI.ingTab = b.dataset.tab; renderIngredients(); });
-  $('#addIng').onclick = () => ingredientModal();
-  $('#buyIng').onclick = () => purchaseModal();
+  if ($('#addIng')) { $('#addIng').onclick = () => ingredientModal(); $('#buyIng').onclick = () => purchaseModal(); }
+  if ($('#addPrep')) $('#addPrep').onclick = () => prepModal();
   main.onclick = async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.addfirst != null) ingredientModal();
+    else if (b.dataset.addfirstprep != null) prepModal();
+    else if (b.dataset.makeprep) produceModal(b.dataset.makeprep);
+    else if (b.dataset.editprep) prepModal(prepById(b.dataset.editprep));
+    else if (b.dataset.dupprep) {
+      const p = JSON.parse(JSON.stringify(prepById(b.dataset.dupprep)));
+      p.id = uid(); p.name += ' (สำเนา)'; p.stock = 0;
+      DB.preps.push(p); commit('คัดลอกสูตรแล้ว');
+    } else if (b.dataset.delprep) {
+      const p = prepById(b.dataset.delprep);
+      const n = usedIn(p.id) + usedInPreps(p.id);
+      if (!await askConfirm(`ลบ "${p.name}"?${n ? `\nส่วนผสมนี้ใช้อยู่ใน ${n} เมนู/สูตร และจะถูกนำออกจากสูตร` : ''}`)) return;
+      DB.preps = DB.preps.filter((x) => x !== p);
+      DB.menus.forEach((m) => { m.ingredients = (m.ingredients || []).filter((r) => r.id !== p.id); });
+      DB.preps.forEach((x) => { x.items = (x.items || []).filter((r) => r.id !== p.id); });
+      commit('ลบส่วนผสมแล้ว');
+    } else if (b.dataset.delprod) {
+      const pr = byId(DB.productions, b.dataset.delprod);
+      if (!await askConfirm('ลบรายการทำนี้? สต็อกวัตถุดิบและส่วนผสมจะถูกคืนกลับ')) return;
+      undoProduction(pr);
+      DB.productions = DB.productions.filter((x) => x !== pr);
+      commit('ลบรายการทำแล้ว');
+    }
     else if (b.dataset.buy) purchaseModal(b.dataset.buy);
     else if (b.dataset.editing) ingredientModal(byId(DB.ingredients, b.dataset.editing));
     else if (b.dataset.deling) {
       const i = byId(DB.ingredients, b.dataset.deling);
-      const n = usedIn(i.id);
-      if (!await askConfirm(`ลบ "${i.name}"?${n ? `\nวัตถุดิบนี้ใช้อยู่ใน ${n} เมนู และจะถูกนำออกจากสูตร` : ''}`)) return;
+      const n = usedIn(i.id) + usedInPreps(i.id);
+      if (!await askConfirm(`ลบ "${i.name}"?${n ? `\nวัตถุดิบนี้ใช้อยู่ใน ${n} เมนู/สูตร และจะถูกนำออกจากสูตร` : ''}`)) return;
       DB.ingredients = DB.ingredients.filter((x) => x !== i);
       DB.menus.forEach((m) => { m.ingredients = (m.ingredients || []).filter((r) => r.id !== i.id); });
+      DB.preps.forEach((x) => { x.items = (x.items || []).filter((r) => r.id !== i.id); });
       commit('ลบวัตถุดิบแล้ว');
     } else if (b.dataset.delpur) {
       const p = byId(DB.purchases, b.dataset.delpur);
@@ -829,6 +873,144 @@ function renderIngredients() {
       commit('ลบรายการซื้อแล้ว');
     }
   };
+}
+
+/* ---------- ส่วนผสมทำเอง ---------- */
+function prepsContent(usedText) {
+  const preps = DB.preps || [];
+  if (!preps.length) return emptyState('🥣', 'ยังไม่มีส่วนผสมทำเอง เช่น ซอสกะเพรา น้ำจิ้มซีฟู้ด หมูหมัก', '<button class="btn primary" data-addfirstprep>＋ เพิ่มสูตรแรก</button>');
+  const prods = [...(DB.productions || [])].sort((a, b) => (b.date + (b.createdAt || '')).localeCompare(a.date + (a.createdAt || ''))).slice(0, 30);
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>ส่วนผสม</th><th>ส่วนประกอบ</th><th class="num">ทำ 1 สูตรได้</th><th class="num">ต้นทุนต่อสูตร</th><th class="num">ต้นทุนต่อหน่วย</th><th class="num">สต็อกคงเหลือ</th><th class="num">ใช้ใน</th><th></th></tr></thead>
+    <tbody>${[...preps].sort((a, b) => a.name.localeCompare(b.name)).map((p) => {
+      const low = p.trackStock && num(p.stock) <= num(p.minStock);
+      const parts = (p.items || []).map((r) => { const it = stockItemById(r.id); return it ? `${esc(it.name)} ${fmt(r.qty, 0)} ${esc(it.unit)}` : ''; }).filter(Boolean);
+      return `<tr>
+      <td><b>🥣 ${esc(p.name)}</b><div class="small muted">${esc(p.category || '')}</div></td>
+      <td class="small" style="max-width:280px">${parts.join(', ') || '<span class="muted">-</span>'}</td>
+      <td class="num">${fmt(p.yieldQty, 0)} ${esc(p.unit)}</td>
+      <td class="num">${baht(prepBatchCost(p))}</td>
+      <td class="num"><b>${bahtU(prepUnitCost(p))}</b> <span class="small muted">/${esc(p.unit)}</span></td>
+      <td class="num">${p.trackStock ? `${fmt(p.stock, 0)} ${esc(p.unit)} ${low ? '<span class="badge warn">ใกล้หมด</span>' : ''}` : '<span class="muted small">ไม่ติดตาม</span>'}</td>
+      <td class="num small">${usedText(p.id)}</td>
+      <td class="actions-cell">${p.trackStock ? `<button class="btn sm" data-makeprep="${esc(p.id)}">🍳 ทำเพิ่ม</button> ` : ''}<button class="btn sm" data-editprep="${esc(p.id)}">แก้ไข</button> <button class="btn sm" data-dupprep="${esc(p.id)}">คัดลอก</button> <button class="btn sm danger" data-delprep="${esc(p.id)}">ลบ</button></td>
+    </tr>`; }).join('')}</tbody></table></div>
+    ${prods.length ? `<div class="section-title">ประวัติการทำส่วนผสม (ล่าสุด)</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>วันที่</th><th>ส่วนผสม</th><th class="num">ทำ</th><th class="num">ได้</th><th class="num">ต้นทุน</th><th>หมายเหตุ</th><th></th></tr></thead>
+      <tbody>${prods.map((pr) => { const p = prepById(pr.prepId); return `<tr>
+        <td>${esc(thDate(pr.date))}${pr.by ? `<div class="small muted">${esc(pr.by.split('@')[0])}</div>` : ''}</td><td>${esc(p ? p.name : pr.name || '(ถูกลบ)')}</td>
+        <td class="num">${fmt(pr.batches, 2)} สูตร</td><td class="num">${fmt(pr.output, 0)} ${esc(p ? p.unit : '')}</td><td class="num">${baht(pr.cost)}</td>
+        <td class="small">${esc(pr.note || '')}</td><td class="actions-cell"><button class="btn sm danger" data-delprod="${esc(pr.id)}">ลบ</button></td></tr>`; }).join('')}</tbody>
+    </table></div>` : ''}`;
+}
+
+function prepModal(p) {
+  const isNew = !p;
+  p = p ? JSON.parse(JSON.stringify(p)) : { id: uid(), name: '', category: '', unit: 'กรัม', yieldQty: '', items: [], trackStock: false, stock: 0, minStock: 0 };
+  const row = (r = {}) => `<div class="row-editor" data-row="item"><select class="input" data-f="id">${stockItemOptions(r.id, p.id)}</select><input class="input num" data-f="qty" value="${esc(r.qty ?? '')}" placeholder="ปริมาณ" inputmode="decimal"><span class="rc"></span><button type="button" class="icon-btn" data-rm aria-label="ลบ">✕</button></div>`;
+  const body = `
+  <div class="form-grid">
+    ${fInput('name', 'ชื่อส่วนผสม *', p.name, { placeholder: 'เช่น ซอสกะเพรา, น้ำจิ้มซีฟู้ด, หมูหมัก' })}
+    ${fInput('category', 'หมวดหมู่', p.category, { placeholder: 'เช่น ซอส, น้ำจิ้ม, ของหมัก', list: 'prepCatList' })}
+    ${fInput('yieldQty', 'ทำ 1 สูตร ได้ปริมาณ *', p.yieldQty, { type: 'number', hint: 'ชั่ง/ตวงหลังทำเสร็จ (หลังเคี่ยว/กรองแล้ว)' })}
+    ${fInput('unit', 'หน่วย *', p.unit, { list: 'unitList', hint: 'หน่วยที่ใช้ตวงใส่เมนู เช่น กรัม, มล.' })}
+  </div>
+  ${datalist('prepCatList', ['ซอส', 'น้ำจิ้ม', 'ของหมัก', 'น้ำซุป', ...(DB.preps || []).map((x) => x.category)])}
+  ${datalist('unitList', ['กรัม', 'มล.', 'ชิ้น', 'ลูก', 'ถ้วย'])}
+  <div class="section-title">ส่วนประกอบใน 1 สูตร</div>
+  <div id="prepRows">${(p.items || []).map(row).join('')}</div>
+  <button type="button" class="btn sm" id="addPrepRow">＋ เพิ่มส่วนประกอบ</button>
+  <div class="section-title">สต็อก</div>
+  <div class="form-grid">
+    <div class="full">${fCheck('trackStock', 'ติดตามสต็อกส่วนผสมนี้ (กด "ทำเพิ่ม" ทุกครั้งที่ทำ)', p.trackStock)}</div>
+    ${fInput('stock', 'สต็อกคงเหลือ', p.stock, { type: 'number', min: '-999999' })}
+    ${fInput('minStock', 'แจ้งเตือนเมื่อเหลือน้อยกว่า', p.minStock, { type: 'number' })}
+  </div>
+  <div class="section-title">สรุปต้นทุน</div>
+  <div id="prepSummary"></div>`;
+  const collect = (root) => {
+    const f = readForm(root);
+    const items = $$('[data-row="item"]', root).map((r) => ({ id: $('[data-f=id]', r).value, qty: num($('[data-f=qty]', r).value) })).filter((r) => r.id);
+    return { ...p, name: f.name.trim(), category: f.category.trim(), unit: f.unit.trim(), yieldQty: num(f.yieldQty), items, trackStock: f.trackStock, stock: num(f.stock), minStock: num(f.minStock) };
+  };
+  const refresh = (root) => {
+    const cur = collect(root);
+    $$('[data-row="item"]', root).forEach((r) => { $('.rc', r).textContent = stockRowText($('[data-f=id]', r).value, num($('[data-f=qty]', r).value)); });
+    const batch = prepBatchCost(cur), unit = prepUnitCost(cur);
+    $('#prepSummary', root).innerHTML = `<div class="grid g3" style="gap:10px">
+      <div class="card kpi"><div class="label">ต้นทุนทำ 1 สูตร</div><div class="value" style="font-size:18px">${baht(batch)}</div></div>
+      <div class="card kpi"><div class="label">ต้นทุนต่อ 1 ${esc(cur.unit || 'หน่วย')}</div><div class="value" style="font-size:18px">${cur.yieldQty > 0 ? bahtU(unit) : '-'}</div></div>
+      <div class="card kpi"><div class="label">ต้นทุนต่อ 10 ${esc(cur.unit || 'หน่วย')}</div><div class="value" style="font-size:18px">${cur.yieldQty > 0 ? baht(unit * 10) : '-'}</div><div class="sub">ตัวอย่างการใช้ในเมนู</div></div>
+    </div>${cur.yieldQty > 0 ? '' : '<p class="small muted">ใส่ "ทำ 1 สูตร ได้ปริมาณ" เพื่อคำนวณต้นทุนต่อหน่วย</p>'}`;
+  };
+  openModal({
+    title: isNew ? '🥣 เพิ่มสูตรส่วนผสม' : `แก้ไขสูตร: ${p.name}`, body, wide: true,
+    onMount: (root) => {
+      refresh(root);
+      root.addEventListener('input', () => refresh(root));
+      root.addEventListener('change', () => refresh(root));
+      root.addEventListener('click', (e) => {
+        const b = e.target.closest('button');
+        if (!b) return;
+        if (b.dataset.rm != null) { b.closest('.row-editor').remove(); refresh(root); }
+        else if (b.id === 'addPrepRow') { $('#prepRows', root).insertAdjacentHTML('beforeend', row()); refresh(root); }
+      });
+    },
+    onSave: (root) => {
+      const res = collect(root);
+      if (!res.name || !res.unit) { toast('กรุณาใส่ชื่อและหน่วย', 'error'); return false; }
+      if (!(res.yieldQty > 0)) { toast('กรุณาใส่ปริมาณที่ได้ต่อ 1 สูตร', 'error'); return false; }
+      if (!res.items.length) { toast('กรุณาใส่ส่วนประกอบอย่างน้อย 1 รายการ', 'error'); return false; }
+      if (isNew) DB.preps.push(res);
+      else Object.assign(prepById(p.id) || {}, res);
+      commit(isNew ? 'เพิ่มส่วนผสมแล้ว' : 'บันทึกแล้ว — ต้นทุนเมนูที่ใช้ส่วนผสมนี้อัปเดตอัตโนมัติ');
+    },
+  });
+}
+
+/** บันทึกการทำส่วนผสม: ตัดสต็อกส่วนประกอบ และเพิ่มสต็อกส่วนผสม */
+function produceModal(prepId) {
+  const p = prepById(prepId);
+  const body = `<div class="form-grid">
+    ${fInput('date', 'วันที่ทำ', today(), { type: 'date' })}
+    ${fInput('batches', 'ทำกี่สูตร', 1, { type: 'number', hint: 'ใส่ทศนิยมได้ เช่น 0.5 = ครึ่งสูตร' })}
+    ${fInput('output', `ได้จริง (${esc(p.unit)})`, p.yieldQty, { type: 'number', hint: 'แก้ได้ถ้าชั่งแล้วได้ไม่ตรงสูตร' })}
+    ${fInput('note', 'หมายเหตุ', '', { placeholder: 'ไม่บังคับ' })}
+    <div class="full hint" id="prodInfo"></div>
+  </div>`;
+  let outputTouched = false;
+  const info = (root) => {
+    const f = readForm(root);
+    if (!outputTouched) $('[name=output]', root).value = round2(num(f.batches) * num(p.yieldQty));
+    const use = stockUsage(p.items, num(f.batches));
+    const lines = use.map((u) => { const it = stockItemById(u.id); return it ? `${esc(it.name)} ${fmt(u.qty, 1)} ${esc(it.unit)}${it.trackStock ? '' : ' <span class="muted">(ไม่ติดตามสต็อก)</span>'}` : ''; }).filter(Boolean);
+    $('#prodInfo', root).innerHTML = `จะตัดสต็อก: ${lines.join(', ') || '-'}<br>ต้นทุนรวม <b>${baht(prepBatchCost(p) * num(f.batches))}</b>`;
+  };
+  openModal({
+    title: `🍳 ทำ${p.name}`, body, saveText: 'บันทึกการทำ',
+    onMount: (root) => {
+      info(root);
+      root.addEventListener('input', (e) => { if (e.target.name === 'output') outputTouched = true; info(root); });
+    },
+    onSave: (root) => {
+      const f = readForm(root);
+      const batches = num(f.batches), output = num(f.output);
+      if (!(batches > 0) || !(output > 0) || !f.date) { toast('กรุณาใส่จำนวนที่ทำและปริมาณที่ได้', 'error'); return false; }
+      const cur = prepById(p.id);
+      if (!cur) { toast('ไม่พบส่วนผสมนี้แล้ว', 'error'); return false; }
+      const usage = stockUsage(cur.items, batches);
+      applyUsage(usage, 1);
+      if (cur.trackStock) cur.stock = round2(num(cur.stock) + output);
+      DB.productions.push({ id: uid(), date: f.date, prepId: cur.id, name: cur.name, batches, output, usage, cost: round2(prepBatchCost(cur) * batches), note: f.note.trim(), by: Sync.email || '', createdAt: Date.now() });
+      commit(`บันทึกการทำแล้ว · สต็อก${cur.name} +${fmt(output, 0)} ${cur.unit}`);
+    },
+  });
+}
+function undoProduction(pr) {
+  applyUsage(pr.usage, -1);
+  const p = prepById(pr.prepId);
+  if (p && p.trackStock) p.stock = round2(num(p.stock) - num(pr.output));
 }
 
 function ingredientModal(i) {
@@ -853,7 +1035,7 @@ function ingredientModal(i) {
   ${datalist('packList', ['กก.', 'กรัม', 'ลิตร', 'ขวด', 'แผง', 'แพ็ก', 'ถุง', 'กระสอบ', 'ลัง', 'กล่อง'])}`;
   const preview = (root) => {
     const f = readForm(root);
-    $('#ingPreview', root).textContent = `${baht(ingUnitCost({ packPrice: f.packPrice, packSize: f.packSize, yield: f.yield }))} / ${f.unit || 'หน่วย'}`;
+    $('#ingPreview', root).textContent = `${bahtU(ingUnitCost({ packPrice: f.packPrice, packSize: f.packSize, yield: f.yield }))} / ${f.unit || 'หน่วย'}`;
   };
   openModal({
     title: isNew ? 'เพิ่มวัตถุดิบ' : `แก้ไข: ${i.name}`, body,
